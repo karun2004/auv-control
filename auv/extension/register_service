@@ -1,0 +1,9 @@
+{
+  "name": "AUV Outer Loop",
+  "description": "Navigation, mission and failsafe outer loops for the Pixhawk AUV",
+  "icon": "mdi-submarine",
+  "company": "AUV",
+  "version": "0.1.0",
+  "webpage": "https://example.com",
+  "api": "https://example.com"
+}

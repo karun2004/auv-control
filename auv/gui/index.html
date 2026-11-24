@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AUV SITL Results</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1b1f24;--mute:#667085;--line:#e2e5ea;--ok:#12805c;--bad:#c0392b;--warn:#b7791f}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0f1318;--card:#171c23;--fg:#e6e9ee;--mute:#8b95a5;--line:#262d37;--ok:#3ecf9a;--bad:#ff6b5b;--warn:#f0b955}}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+header{padding:16px;border-bottom:1px solid var(--line);display:flex;gap:16px;flex-wrap:wrap;align-items:baseline}
+h1{font-size:18px;margin:0}
+.sub{color:var(--mute)}
+main{padding:16px;max-width:1200px;margin:0 auto}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.tile b{display:block;font-size:22px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+tbody tr{cursor:pointer}tbody tr:hover{background:color-mix(in srgb,var(--fg) 5%,transparent)}
+.wrap{overflow-x:auto}
+.pass{color:var(--ok);font-weight:600}.fail{color:var(--bad);font-weight:600}.warn{color:var(--warn)}
+#detail{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;display:none}
+#detail img{max-width:100%;height:auto;border-radius:4px}
+#detail h2{font-size:15px;margin:0 0 8px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 16px;margin:8px 0}
+.kv span{color:var(--mute)}
+#err{color:var(--bad);padding:0 0 12px}
+button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+<h1>AUV SITL Results</h1>
+<span class="sub" id="meta"></span>
+<button id="reload">Reload</button>
+</header>
+<main>
+<div id="err"></div>
+<div class="tiles" id="tiles"></div>
+<div class="wrap"><table id="tbl" hidden>
+<thead><tr><th>Scenario</th><th>Result</th><th>Cross-track RMS m</th><th>Depth RMS m</th><th>Closure to last WP m</th><th>Max depth m</th><th>Max fail</th><th>Final state</th><th>Surfaced</th></tr></thead>
+<tbody></tbody></table></div>
+<div id="detail"></div>
+<h2 style="font-size:15px;margin-top:24px">Log replay (real logs)</h2>
+<div class="wrap" id="replay"><span class="sub">No replay report yet.</span></div>
+</main>
+<script>
+// Targets from the plan: cross-track RMS < 2 m, depth RMS < 0.3 m.
+const T={xt:2.0,depth:0.3};
+// Data base: works when served from the auv/ root as /gui/ (python -m http.server) or by the extension.
+const BASES=['../sim/out/','/sim/out/','sim/out/'];
+const f=(v,d=2)=>v==null?'-':Number(v).toFixed(d);
+const cls=(v,t)=>v==null?'':(v<t?'':'warn');
+async function getJSON(name){
+  for(const b of BASES){
+    try{const r=await fetch(b+name,{cache:'no-store'});if(r.ok)return {data:await r.json(),base:b}}catch(e){}
+  }
+  return null;
+}
+async function load(){
+  document.getElementById('err').textContent='';
+  const res=await getJSON('results.json');
+  if(!res){document.getElementById('err').textContent='results.json not found. Run: .venv/bin/python -m sim.run_sitl, then from the auv/ root: .venv/bin/python -m http.server 8000 and open http://localhost:8000/gui/';return}
+  const rows=res.data,base=res.base;
+  const pass=rows.filter(r=>r.pass).length;
+  const xt=rows.map(r=>r.cross_track_rms_m).filter(v=>v!=null);
+  document.getElementById('meta').textContent=rows.length+' scenarios';
+  document.getElementById('tiles').innerHTML=
+    tile('Passed',pass+' / '+rows.length,pass==rows.length?'pass':'warn')+
+    tile('Best cross-track RMS',xt.length?f(Math.min(...xt))+' m':'-')+
+    tile('Target cross-track',' < '+T.xt+' m')+
+    tile('Target depth RMS',' < '+T.depth+' m');
+  const tb=document.querySelector('#tbl tbody');tb.innerHTML='';
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${r.scenario}</td><td class="${r.pass?'pass':'fail'}">${r.pass?'PASS':'FAIL'}</td>
+    <td class="${cls(r.cross_track_rms_m,T.xt)}">${f(r.cross_track_rms_m)}</td>
+    <td class="${cls(r.depth_rms_m,T.depth)}">${f(r.depth_rms_m)}</td>
+    <td>${f(r.closure_error_to_last_wp_m,1)}</td><td>${f(r.max_depth_m)}</td>
+    <td>${r.max_fail_level}</td><td>${r.final_state}</td><td>${r.surfaced?'yes':'no'}</td>`;
+    tr.onclick=()=>show(r,base);tb.appendChild(tr);
+  });
+  document.getElementById('tbl').hidden=false;
+  loadReplay();
+}
+function tile(a,b,c=''){return `<div class="tile"><span class="sub">${a}</span><b class="${c}">${b}</b></div>`}
+function show(r,base){
+  const d=document.getElementById('detail');d.style.display='block';
+  d.innerHTML=`<h2>${r.scenario}</h2><div class="kv">`+
+    Object.entries(r).filter(([k])=>k!=='scenario').map(([k,v])=>`<div><span>${k}</span> ${Array.isArray(v)?v.join(', ')||'-':typeof v=='number'?f(v,3):v}</div>`).join('')+
+    `</div><img alt="${r.scenario} plot" src="${base}${r.scenario}.png" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'No plot for this scenario.',className:'sub'}))">`;
+  d.scrollIntoView({behavior:'smooth'});
+}
+async function loadReplay(){
+  const res=await getJSON('replay_report.json');
+  const el=document.getElementById('replay');
+  if(!res){el.innerHTML='<span class="sub">No replay report yet.</span>';return}
+  const d=res.data;
+  const rows=Array.isArray(d)?d:(d.logs||Object.entries(d).map(([k,v])=>({file:k,...(typeof v==='object'?v:{value:v})})));
+  if(!rows.length||typeof rows[0]!=='object'){el.innerHTML='<pre>'+JSON.stringify(d,null,1)+'</pre>';return}
+  const cols=[...new Set(rows.flatMap(r=>Object.keys(r)))].filter(k=>typeof rows.find(r=>r[k]!=null)?.[k]!=='object');
+  el.innerHTML='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>'+
+    rows.map(r=>'<tr>'+cols.map(c=>`<td>${typeof r[c]==='number'?f(r[c],3):(r[c]??'-')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
+}
+document.getElementById('reload').onclick=load;
+load();
+</script>
+</body>
+</html>

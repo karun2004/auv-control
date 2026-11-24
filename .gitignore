@@ -1,0 +1,8 @@
+.DS_Store
+__pycache__/
+*.pyc
+auv/.venv/
+auv/sim/out/
+.pytest_cache/
+# 1.4 GB BlueOS image: over GitHub's 100 MB file limit, download it from Blue Robotics instead
+BlueOS-*.zip
